@@ -2038,7 +2038,8 @@ All markers must be valid to proceed.
                 # Center text to top side
                 textL.adjustSize()
                 pos = bboxL.topLeft()
-                pos.setX(pos.x() + 0.5 + (MarkerObjData.MARKER_SIZE - textL.textWidth() / 2.0 / zoomL) / self.pxSizeL)
+                # pos.setX(pos.x() + MarkerObjData.MARKER_SIZE / self.pxSizeL - textL.textWidth() / 2.0 / zoomL)
+                pos.setX(pos.x() - textL.textWidth() / 2.0 / zoomL)
                 pos.setY(pos.y() - textL.boundingRect().height() / zoomL)
                 textL.setPos(pos)
                 # Left error
@@ -2054,7 +2055,7 @@ All markers must be valid to proceed.
                 # Center text to bottom side
                 errL.adjustSize()
                 pos = bboxL.bottomLeft()
-                pos.setX(pos.x() + 0.5 + (MarkerObjData.MARKER_SIZE - errL.textWidth() / 2.0 / zoomL) / self.pxSizeL)
+                pos.setX(pos.x() + MarkerObjData.MARKER_SIZE / self.pxSizeL - errL.textWidth() / 2.0 / zoomL)
                 errL.setPos(pos)
                 # Add text to scenes
                 self.leftImgViewer.scene.addItem(textL)
@@ -2072,7 +2073,8 @@ All markers must be valid to proceed.
                 # Center text to top side
                 textR.adjustSize()
                 pos = bboxR.topLeft()
-                pos.setX(pos.x() + 0.5 + (MarkerObjData.MARKER_SIZE - textR.textWidth() / 2.0 / zoomR) / self.pxSizeR)
+                # pos.setX(pos.x() + MarkerObjData.MARKER_SIZE / self.pxSizeR - textR.textWidth() / 2.0 / zoomR)
+                pos.setX(pos.x() - textR.textWidth() / 2.0 / zoomR)
                 pos.setY(pos.y() - textR.boundingRect().height() / zoomR)
                 textR.setPos(pos)
                 # Right error
@@ -2088,7 +2090,7 @@ All markers must be valid to proceed.
                 # Center text to bottom side
                 errR.adjustSize()
                 pos = bboxR.bottomLeft()
-                pos.setX(pos.x() + 0.5 + (MarkerObjData.MARKER_SIZE - errR.textWidth() / 2.0 / zoomR) / self.pxSizeR)
+                pos.setX(pos.x() + MarkerObjData.MARKER_SIZE / self.pxSizeR - errR.textWidth() / 2.0 / zoomR)
                 errR.setPos(pos)
                 # Add text to scenes
                 self.rightImgViewer.scene.addItem(textR)
