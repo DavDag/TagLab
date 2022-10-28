@@ -40,7 +40,7 @@ class QtProjectEditor(QWidget):
 
         self.area = QScrollArea()
         self.area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        self.area.setMaximumHeight(500)
+        self.area.setMaximumHeight(250)
         widget = QWidget()
         widget.setLayout(QVBoxLayout())
         widget.setMinimumHeight(150)
@@ -74,7 +74,7 @@ class QtProjectEditor(QWidget):
 
             self.text = QTextEdit()
             map_widget.setProperty("class", "map-item")
-            self.text.setMinimumWidth(800)
+            self.text.setMinimumWidth(1000)
 
             date = self.convertDate(img.acquisition_date)
             day = date.day()
@@ -83,10 +83,17 @@ class QtProjectEditor(QWidget):
             "<b>Map size in pixels</b>" + " : " + "(" + str(img.width) + "," + str(img.height) + ")")
             self.text.append("<b>Map pixel size in mm</b>" + " : " + str(img.map_px_to_mm_factor))
             self.text.append("<b>Map acquisition date</b>" + " : " + str(day) + " " + date.longMonthName(date.month()) + " " +  str(year))
-            self.text.append("<b>Map georeference information</b>" + " : " + str(self.georefAvailable(img.georef_filename)))
+
+            if img.georef_filename == "":
+                self.text.append("<b>Map georeference information</b>" + " : None.")
+            else:
+                self.text.append("<b>Map georeference information</b>" + " : <br><pre>" + self.georefAvailable(
+                img.georef_filename) + "</pre>")
+
             self.text.append("<b>DEM availability</b>" + " : " + str(self.boolToWord(len(img.channels)>1)))
             self.text.document().adjustSize()  # calculate size
-            self.text.setMaximumHeight(self.text.document().size().height() + 20)
+
+            self.text.setMinimumHeight(self.text.document().size().height())
 
             map_layout = QHBoxLayout()
             map_layout.addWidget(QLabel("<b>Map name</b>" + " : " + img.name))
@@ -95,6 +102,11 @@ class QtProjectEditor(QWidget):
             edit.setMaximumWidth(80)
             edit.clicked.connect(lambda x, img=img: self.editMap(img))
             map_layout.addWidget(edit)
+
+            #crop = QPushButton("crop")
+            #crop.setMaximumWidth(80)
+            #crop.clicked.connect(lambda x, img=img: self.cropMap(img))
+            #map_layout.addWidget(crop)
 
             delete = QPushButton("delete")
             delete.setMaximumWidth(80)
@@ -120,6 +132,10 @@ class QtProjectEditor(QWidget):
         # mapWidget actually disconnects everything before show
         self.parent().mapWidget.accepted.connect(self.fillMaps)
 
+    def cropMap(self, img):
+
+        self.parent().cropMapImage(img)
+
     def deleteMap(self, img):
 
         reply = QMessageBox.question(self, "Deleting map",
@@ -135,14 +151,19 @@ class QtProjectEditor(QWidget):
         self.closed.emit()
 
 
-    def georefAvailable(self,str):
+    def georefAvailable(self, path):
 
-        if str == '':
+        if path == "":
             return "None"
         else:
-            img = rio.open(str)
+            img = rio.open(path)
             geoinfo = img.crs
-            return geoinfo
+
+            from osgeo import osr
+            srs = osr.SpatialReference()
+            srs.ImportFromWkt(geoinfo.to_wkt())
+            pretty_wkt = srs.ExportToPrettyWkt()
+            return pretty_wkt
 
     def boolToWord(self, bool):
 

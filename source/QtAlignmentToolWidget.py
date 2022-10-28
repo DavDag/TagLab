@@ -10,7 +10,7 @@ import cv2
 from PyQt5.QtCore import pyqtSignal, Qt, pyqtSlot, QLineF, QRectF, QPoint, QPointF
 from PyQt5.QtGui import QImage, QMouseEvent, QPen, QFont, QCloseEvent, QKeyEvent, QOpenGLShaderProgram, QOpenGLShader, \
     QOpenGLVersionProfile, QMatrix4x4, QWheelEvent, QOpenGLTexture, QOpenGLFramebufferObject, QVector4D, QVector2D
-from PyQt5.QtWidgets import QWidget, QSizePolicy, QVBoxLayout, QLabel, QHBoxLayout, QComboBox, QSlider, QApplication, \
+from PyQt5.QtWidgets import QWidget, QHeaderView, QSizePolicy, QVBoxLayout, QLabel, QLineEdit, QTableWidget, QTableView, QHBoxLayout, QTableWidgetItem,  QComboBox, QSlider, QApplication, \
     QCheckBox, QPushButton, QMessageBox, QGraphicsTextItem, QGraphicsItem, QOpenGLWidget, QGraphicsRectItem
 from PyQt5._QOpenGLFunctions_2_0 import QOpenGLFunctions_2_0
 
@@ -120,6 +120,7 @@ class QtSimpleOpenGlShaderViewer(QOpenGLWidget):
         self.tra: QPointF = QPointF(0, 0)
         self.sca = 1
 
+
     def __createProgram(self, vSrc: str, fSrc: str, hasTex: bool) -> Optional[QOpenGLShaderProgram]:
         """
         Private method to create a Shader Program with passed v-shader and f-shader.
@@ -179,6 +180,13 @@ class QtSimpleOpenGlShaderViewer(QOpenGLWidget):
         :param: i the index of texture & dest framebuffer
         :param: mat the matrix for the transformation
         """
+
+        if self.textures is None:  # textures has not been created yet
+            return
+
+        if len(self.textures) <= i: 
+            return
+
         # Bind FB and Program
         checkGL(self.framebuffers[i], self.framebuffers[i].bind())
         checkGL(self.programs[0], self.programs[0].bind())
@@ -212,6 +220,13 @@ class QtSimpleOpenGlShaderViewer(QOpenGLWidget):
         Private method to draw framebuffer with scripted program.
         :param: mat the transformation matrix
         """
+
+        if self.programs is None:
+            return
+
+        if len(self.programs) <= 1:  # textures has not been created yet
+            return
+
         # Bind Program
         checkGL(self.programs[1], self.programs[1].bind())
         # Bind Textures (from Frame Buffers)
@@ -667,6 +682,8 @@ class MarkerObjData:
         self.typ = typ
         self.sceneObjs = []
         self.textObjs = []
+        self.errorx = None
+        self.errory = None
         self.error = None
         self.weight = 0
         self.pen = QPen(Qt.white, MarkerObjData.MARKER_WIDTH)
@@ -800,12 +817,14 @@ class QtAlignmentToolWidget(QWidget):
     # Number of samples used when calculating approx scale
     SCALE_SAMPLING_COUNT = 64
 
-    ROT_PRECISION = 10  # 1 / 10
+    ROT_PRECISION = 100  # 1 / 100
     SCALE_PRECISION = 100  # 1 / 100
     SCALE_RANGE = 0.50  # [-50%, +50%]
 
     def __init__(self, project, parent=None):
         super(QtAlignmentToolWidget, self).__init__(parent)
+
+        self.setStyleSheet("background-color: rgb(40,40,40); color: white")
 
         # ==============================================================
 
@@ -822,9 +841,9 @@ class QtAlignmentToolWidget(QWidget):
         self.sizeR: QPointF = QPointF(0.0, 0.0)
         self.canScale = False
         self.svdRes = [0, [0, 0], 0]
-        self.R = np.rad2deg(0) * 10
+        self.R = np.rad2deg(0) * QtAlignmentToolWidget.ROT_PRECISION
         self.T = np.array([0, 0])
-        self.S = 1 * 10
+        self.S = 1 * QtAlignmentToolWidget.SCALE_PRECISION
         self.lastMousePos = None
         self.isDragging = False
         self.selectedMarker = None
@@ -833,8 +852,11 @@ class QtAlignmentToolWidget(QWidget):
         self.lMarkerIndex = 0
         self.rMarkerIndex = 0
         self.markers: List[MarkerObjData] = []
+        self.markers_copy = None
         self.pxSizeL = 1.0
         self.pxSizeR = 1.0
+        self.error_table_flag = False
+
 
         # ==============================================================
         # Top buttons
@@ -850,19 +872,19 @@ class QtAlignmentToolWidget(QWidget):
         # Auto Align
         self.autoAlignButton = QPushButton("Preview Alignment")
         self.autoAlignButton.setFixedWidth(200)
-        self.autoAlignButton.setFixedHeight(30)
+        self.autoAlignButton.setFixedHeight(20)
         self.autoAlignButton.clicked.connect(self.onAutoAlignRequested)
 
         # Back to Edit
         self.backToEditButton = QPushButton("Back to Edit")
         self.backToEditButton.setFixedWidth(150)
-        self.backToEditButton.setFixedHeight(30)
+        self.backToEditButton.setFixedHeight(20)
         self.backToEditButton.clicked.connect(self.onBackToEditRequested)
 
         # Clear Markers
         self.clearMarkersButton = QPushButton("Clear Markers")
         self.clearMarkersButton.setFixedWidth(200)
-        self.clearMarkersButton.setFixedHeight(30)
+        self.clearMarkersButton.setFixedHeight(20)
         self.clearMarkersButton.clicked.connect(self.onClearMarkersRequested)
 
         # Allow Scale
@@ -880,13 +902,13 @@ class QtAlignmentToolWidget(QWidget):
         # Reset transformations
         self.resetTransfButton = QPushButton("Reset Transformations")
         self.resetTransfButton.setFixedWidth(300)
-        self.resetTransfButton.setFixedHeight(30)
+        self.resetTransfButton.setFixedHeight(20)
         self.resetTransfButton.clicked.connect(self.onResetTransformations)
 
         # Confirm Alignment
         self.confirmAlignmentButton = QPushButton("Confirm")
         self.confirmAlignmentButton.setFixedWidth(100)
-        self.confirmAlignmentButton.setFixedHeight(30)
+        self.confirmAlignmentButton.setFixedHeight(20)
         self.confirmAlignmentButton.clicked.connect(self.onConfirmAlignment)
 
         # Slider
@@ -929,30 +951,30 @@ class QtAlignmentToolWidget(QWidget):
         self.ySlider.valueChanged.connect(self.yOffsetChanges)
 
         # Arrows (<, ^, ...)
-        self.moveLeftButton = QPushButton("Left")
-        self.moveLeftButton.setFixedWidth(100)
-        self.moveLeftButton.setFixedHeight(30)
+        self.moveLeftButton = QPushButton("-")
+        self.moveLeftButton.setFixedWidth(20)
+        self.moveLeftButton.setFixedHeight(20)
         self.moveLeftButton.clicked.connect(self.onXValueDecremented)
-        self.moveRightButton = QPushButton("Right")
-        self.moveRightButton.setFixedWidth(100)
-        self.moveRightButton.setFixedHeight(30)
+        self.moveRightButton = QPushButton("+")
+        self.moveRightButton.setFixedWidth(20)
+        self.moveRightButton.setFixedHeight(20)
         self.moveRightButton.clicked.connect(self.onXValueIncremented)
-        self.moveDownButton = QPushButton("Down")
-        self.moveDownButton.setFixedWidth(100)
-        self.moveDownButton.setFixedHeight(30)
-        self.moveDownButton.clicked.connect(self.onYValueDecremented)
-        self.moveUpButton = QPushButton("Up")
-        self.moveUpButton.setFixedWidth(100)
-        self.moveUpButton.setFixedHeight(30)
-        self.moveUpButton.clicked.connect(self.onYValueIncremented)
+        self.moveDownButton = QPushButton("+")
+        self.moveDownButton.setFixedWidth(20)
+        self.moveDownButton.setFixedHeight(20)
+        self.moveDownButton.clicked.connect(self.onYValueIncremented)
+        self.moveUpButton = QPushButton("-")
+        self.moveUpButton.setFixedWidth(20)
+        self.moveUpButton.setFixedHeight(20)
+        self.moveUpButton.clicked.connect(self.onYValueDecremented)
 
         # Slider (Rot)
         self.rSliderLabel = QLabel("R: " + str(self.R / QtAlignmentToolWidget.ROT_PRECISION))
         self.rSliderLabel.setMinimumWidth(100)
         self.rSlider = QSlider(Qt.Horizontal)
         self.rSlider.setFocusPolicy(Qt.StrongFocus)
-        self.rSlider.setMinimum(-1800)
-        self.rSlider.setMaximum(1800)
+        self.rSlider.setMinimum(-180 * QtAlignmentToolWidget.ROT_PRECISION)
+        self.rSlider.setMaximum(180 * QtAlignmentToolWidget.ROT_PRECISION)
         self.rSlider.setTickInterval(1)
         self.rSlider.setValue(self.R)
         self.rSlider.setMinimumWidth(50)
@@ -960,18 +982,18 @@ class QtAlignmentToolWidget(QWidget):
         self.rSlider.valueChanged.connect(self.rotationAngleChanges)
 
         # Rotate Left / Right
-        self.rotateLeftButton = QPushButton("Rotate Left")
-        self.rotateLeftButton.setFixedWidth(200)
-        self.rotateLeftButton.setFixedHeight(30)
-        self.rotateLeftButton.clicked.connect(self.onRotValueDecremented)
-        self.rotateRightButton = QPushButton("Rotate Right")
-        self.rotateRightButton.setFixedWidth(200)
-        self.rotateRightButton.setFixedHeight(30)
-        self.rotateRightButton.clicked.connect(self.onRotValueIncremented)
+        self.rotateLeftButton = QPushButton("+")
+        self.rotateLeftButton.setFixedWidth(20)
+        self.rotateLeftButton.setFixedHeight(20)
+        self.rotateLeftButton.clicked.connect(self.onRotValueIncremented)
+        self.rotateRightButton = QPushButton("-")
+        self.rotateRightButton.setFixedWidth(20)
+        self.rotateRightButton.setFixedHeight(20)
+        self.rotateRightButton.clicked.connect(self.onRotValueDecremented)
 
         # Slider (Scale)
         self.sSliderLabel = QLabel("S: " + str(self.S / QtAlignmentToolWidget.SCALE_PRECISION))
-        self.sSliderLabel.setMinimumWidth(100)
+        self.sSliderLabel.setMinimumWidth(200)
         self.sSlider = QSlider(Qt.Horizontal)
         self.sSlider.setFocusPolicy(Qt.StrongFocus)
         self.sSlider.setMinimum(1)
@@ -982,6 +1004,18 @@ class QtAlignmentToolWidget(QWidget):
         self.sSlider.setAutoFillBackground(True)
         self.sSlider.valueChanged.connect(self.scaleValueChanges)
         self.sSlider.setEnabled(False)
+
+        # Scale increase / decrease
+        self.scaleDecButton = QPushButton("-")
+        self.scaleDecButton.setFixedWidth(20)
+        self.scaleDecButton.setFixedHeight(20)
+        self.scaleDecButton.clicked.connect(self.onScaleValueDecremented)
+        self.scaleDecButton.setEnabled(False)
+        self.scaleIncButton = QPushButton("+")
+        self.scaleIncButton.setFixedWidth(20)
+        self.scaleIncButton.setFixedHeight(20)
+        self.scaleIncButton.setEnabled(False)
+        self.scaleIncButton.clicked.connect(self.onScaleValueIncremented)
 
         # Slider (Threshold)
         self.thresholdSliderLabel = QLabel("Threshold: " + str(self.threshold))
@@ -997,53 +1031,101 @@ class QtAlignmentToolWidget(QWidget):
         self.thresholdSlider.valueChanged.connect(self.thresholdValueChanges)
 
         # Layout
-        self.buttons = QVBoxLayout()
-        layout1 = QHBoxLayout()
-        layout1.addWidget(self.syncCheck)
-        layout1.addWidget(self.backToEditButton)
-        layout1.addWidget(self.clearMarkersButton)
-        layout1.addWidget(self.resetTransfButton)
-        layout1.addWidget(self.showMarkersCheck)
-        layout1.addWidget(self.allowScaleButton)
-        layout1.addWidget(self.autoAlignButton)
-        layout1.addWidget(self.confirmAlignmentButton)
-        layout1.setAlignment(self.syncCheck, Qt.AlignLeft)
-        layout1.setAlignment(self.backToEditButton, Qt.AlignLeft)
-        layout1.setAlignment(self.clearMarkersButton, Qt.AlignCenter)
-        layout1.setAlignment(self.resetTransfButton, Qt.AlignCenter)
-        layout1.setAlignment(self.showMarkersCheck, Qt.AlignCenter)
-        layout1.setAlignment(self.allowScaleButton, Qt.AlignCenter)
-        layout1.setAlignment(self.autoAlignButton, Qt.AlignRight)
-        layout1.setAlignment(self.confirmAlignmentButton, Qt.AlignRight)
-        self.buttons.addLayout(layout1)
-        layout2 = QHBoxLayout()
-        layout2.addWidget(self.alphaSliderLabel)
-        layout2.addWidget(self.alphaSlider)
-        layout2.addWidget(self.thresholdSliderLabel)
-        layout2.addWidget(self.thresholdSlider)
-        self.buttons.addLayout(layout2)
+        self.buttons = QHBoxLayout()
+        self.buttons.addWidget(self.syncCheck)
+        self.buttons.addWidget(self.backToEditButton)
+        self.buttons.addWidget(self.clearMarkersButton)
+        self.buttons.addWidget(self.resetTransfButton)
+        self.buttons.addWidget(self.showMarkersCheck)
+        #self.buttons.addWidget(self.allowScaleButton)
+        self.buttons.addWidget(self.autoAlignButton)
+        self.buttons.addWidget(self.confirmAlignmentButton)
+        self.buttons.setAlignment(self.syncCheck, Qt.AlignLeft)
+        self.buttons.setAlignment(self.backToEditButton, Qt.AlignLeft)
+        self.buttons.setAlignment(self.clearMarkersButton, Qt.AlignCenter)
+        self.buttons.setAlignment(self.resetTransfButton, Qt.AlignCenter)
+        self.buttons.setAlignment(self.showMarkersCheck, Qt.AlignCenter)
+        self.buttons.setAlignment(self.allowScaleButton, Qt.AlignCenter)
+        self.buttons.setAlignment(self.autoAlignButton, Qt.AlignRight)
+        self.buttons.setAlignment(self.confirmAlignmentButton, Qt.AlignRight)
+
+        self.layoutSliders=QVBoxLayout()
         layout3 = QHBoxLayout()
         layout3.addWidget(self.xSliderLabel)
         layout3.addWidget(self.xSlider)
-        layout3.addWidget(self.moveLeftButton)
         layout3.addWidget(self.moveRightButton)
-        self.buttons.addLayout(layout3)
+        layout3.addWidget(self.moveLeftButton)
+        self.layoutSliders.addLayout(layout3)
         layout4 = QHBoxLayout()
         layout4.addWidget(self.ySliderLabel)
         layout4.addWidget(self.ySlider)
         layout4.addWidget(self.moveDownButton)
         layout4.addWidget(self.moveUpButton)
-        self.buttons.addLayout(layout4)
+        self.layoutSliders.addLayout(layout4)
         layout5 = QHBoxLayout()
         layout5.addWidget(self.rSliderLabel)
         layout5.addWidget(self.rSlider)
         layout5.addWidget(self.rotateLeftButton)
         layout5.addWidget(self.rotateRightButton)
-        self.buttons.addLayout(layout5)
+        self.layoutSliders.addLayout(layout5)
         layout6 = QHBoxLayout()
         layout6.addWidget(self.sSliderLabel)
         layout6.addWidget(self.sSlider)
-        self.buttons.addLayout(layout6)
+        layout6.addWidget(self.scaleIncButton)
+        layout6.addWidget(self.scaleDecButton)
+        # self.layoutSliders.addLayout(layout6)
+
+        self.table = QTableWidget(10, 5)
+        self.table.setHorizontalHeaderLabels(["Add/remove","Point Id", "X err", "Y err", "Dist err"])
+        self.table.setSelectionBehavior(QTableView.SelectRows)
+        self.table.setSelectionMode(QTableView.SingleSelection)
+        self.table.verticalHeader().hide()
+        self.table.setMaximumHeight(200)
+        self.table.setStyleSheet("QTableCornerButton::section { background-color: rgb(40,40,40); }"
+                                 "QHeaderView::section { background-color: rgb(40,40,40); }")
+
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+
+        self.labelmeanx = QLabel("Mean Ex: ")
+        self.labelmeanx .setFixedWidth(120)
+        self.meanex = QLabel(" ")
+
+        self.layoutmeanx = QHBoxLayout()
+        self.layoutmeanx.addWidget(self.labelmeanx)
+        self.layoutmeanx.addWidget(self.meanex)
+
+        self.labelmeany = QLabel("Mean Ey: ")
+        self.labelmeany .setFixedWidth(120)
+        self.meaney = QLabel(" ")
+
+        self.layoutmeany = QHBoxLayout()
+        self.layoutmeany.addWidget(self.labelmeany)
+        self.layoutmeany.addWidget(self.meaney)
+
+        self.labelmeanerr= QLabel("Mean Dist: ")
+        self.labelmeanerr.setFixedWidth(120)
+        self.meanerror = QLabel(" ")
+
+        self.layoutmeanerror = QHBoxLayout()
+        self.layoutmeanerror.addWidget(self.labelmeanerr)
+        self.layoutmeanerror.addWidget(self.meanerror)
+
+        self.layoutmeanerrors = QVBoxLayout()
+        self.layoutmeanerrors.addLayout(self.layoutmeanx)
+        self.layoutmeanerrors.addLayout(self.layoutmeany)
+        self.layoutmeanerrors.addLayout(self.layoutmeanerror)
+
+
+        self.layoutTop = QHBoxLayout()
+        self.layoutTop.addLayout(self.layoutSliders)
+        self.layoutTop.addSpacing(50)
+        self.layoutTop.addWidget(self.table)
+        self.layoutTop.addSpacing(50)
+        self.layoutTop.addLayout(self.layoutmeanerrors)
+        self.layoutTop.addSpacing(10)
 
         # ==============================================================
         # Middle UI containing map selector and map viewer
@@ -1117,9 +1199,25 @@ class QtAlignmentToolWidget(QWidget):
         self.leftPreviewViewer = AlphaPreviewViewer()
         self.rightPreviewViewer = GrayPreviewViewer()
 
+        layoutAS= QHBoxLayout()
+        layoutAS.addWidget(self.alphaSliderLabel)
+        layoutAS.addWidget(self.alphaSlider)
+
+        layoutDIFF = QHBoxLayout()
+        layoutDIFF.addWidget(self.thresholdSliderLabel)
+        layoutDIFF.addWidget(self.thresholdSlider)
+
+        self.previewLayoutL = QVBoxLayout()
+        self.previewLayoutL.addLayout(layoutAS)
+        self.previewLayoutL.addWidget(self.leftPreviewViewer)
+
+        self.previewLayoutR = QVBoxLayout()
+        self.previewLayoutR.addLayout(layoutDIFF)
+        self.previewLayoutR.addWidget(self.rightPreviewViewer)
+
         self.previewLayout = QHBoxLayout()
-        self.previewLayout.addWidget(self.leftPreviewViewer)
-        self.previewLayout.addWidget(self.rightPreviewViewer)
+        self.previewLayout.addLayout(self.previewLayoutL)
+        self.previewLayout.addLayout(self.previewLayoutR)
 
         # ==============================================================
         # Initialize layouts
@@ -1127,6 +1225,7 @@ class QtAlignmentToolWidget(QWidget):
 
         content = QVBoxLayout()
         content.addLayout(self.buttons)
+        content.addLayout(self.layoutTop)
         content.addLayout(self.editLayout)
         content.addLayout(self.previewLayout)
 
@@ -1273,6 +1372,7 @@ class QtAlignmentToolWidget(QWidget):
         self.canScale = value != 0
         # Recompute svd
         self.__leastSquaresWithSVD()
+
         # Update preview (if needed)
         self.__updatePreview()
 
@@ -1282,8 +1382,9 @@ class QtAlignmentToolWidget(QWidget):
         Callback called when the Preview Mode is turned on/off.
         :param: value a boolean representing if the mode is checked.
         """
-        # Recompute svd
-        self.__leastSquaresWithSVD()
+        # Recompute svd ---  WHY?
+        # self.__leastSquaresWithSVD()
+        self.markers = self.markers_copy.copy()
         # Hide preview widgets
         self.__togglePreviewMode(False)
 
@@ -1296,7 +1397,9 @@ class QtAlignmentToolWidget(QWidget):
         # Update alpha value and slider text
         self.alpha = value
         self.alphaSliderLabel.setText("Alpha: " + str(value))
+
         # Update preview
+        self.error_table_flag = False
         self.__updatePreview()
 
     @pyqtSlot()
@@ -1306,6 +1409,7 @@ class QtAlignmentToolWidget(QWidget):
         """
         # Forward
         self.xSlider.setValue(self.T[0] + 1)
+
 
     @pyqtSlot()
     def onXValueDecremented(self) -> None:
@@ -1324,7 +1428,9 @@ class QtAlignmentToolWidget(QWidget):
         # Update offset value and slider text
         self.T[0] = value
         self.xSliderLabel.setText("Tx: " + str(value))
+
         # Update preview
+        self.error_table_flag = True
         self.__updatePreview()
 
     @pyqtSlot()
@@ -1352,7 +1458,9 @@ class QtAlignmentToolWidget(QWidget):
         # Update offset value and slider text
         self.T[1] = value
         self.ySliderLabel.setText("Ty: " + str(value))
+
         # Update preview
+        self.error_table_flag = True
         self.__updatePreview()
 
     @pyqtSlot()
@@ -1371,6 +1479,22 @@ class QtAlignmentToolWidget(QWidget):
         # Forward
         self.rSlider.setValue(self.R - 1)
 
+    @pyqtSlot()
+    def onScaleValueIncremented(self) -> None:
+        """
+        Callback called when the value of the scale should be increase.
+        """
+        # Forward
+        self.sSlider.setValue(self.S + 1)
+
+    @pyqtSlot()
+    def onScaleValueDecremented(self) -> None:
+        """
+        Callback called when the value of the scale should be decreased.
+        """
+        # Forward
+        self.sSlider.setValue(self.S - 1)
+
     @pyqtSlot(int)
     def rotationAngleChanges(self, value: int) -> None:
         """
@@ -1379,7 +1503,9 @@ class QtAlignmentToolWidget(QWidget):
         """
         self.R = value
         self.rSliderLabel.setText("R: " + str(self.R / QtAlignmentToolWidget.ROT_PRECISION))
+
         # Update preview
+        self.error_table_flag = True
         self.__updatePreview()
 
     @pyqtSlot(int)
@@ -1390,7 +1516,9 @@ class QtAlignmentToolWidget(QWidget):
         """
         self.S = value
         self.sSliderLabel.setText("S: " + str(self.S / QtAlignmentToolWidget.SCALE_PRECISION))
+
         # Update preview
+        self.error_table_flag = True
         self.__updatePreview()
 
     @pyqtSlot(int)
@@ -1402,7 +1530,9 @@ class QtAlignmentToolWidget(QWidget):
         # Update threshold value and slider text
         self.threshold = value
         self.thresholdSliderLabel.setText("Threshold: " + str(value))
+
         # Update preview
+        self.error_table_flag = False
         self.__updatePreview()
 
     @pyqtSlot(QMouseEvent)
@@ -1532,7 +1662,7 @@ All markers must be valid to proceed.
         image2 = self.project.images[index2]
         image1W, image1H = image1.channels[0].qimage.width(), image1.channels[0].qimage.height()
         image2W, image2H = image2.channels[0].qimage.width(), image2.channels[0].qimage.height()
-        print("Sizes: ", image1W, image1H, image2W, image2H)
+
         # ================================ Transformation Data =============================================
         # Calculate affine matrix
         trax = self.T[0]
@@ -1542,7 +1672,7 @@ All markers must be valid to proceed.
         # Extract components
         R = cv2.getRotationMatrix2D((0, 0), -rot, 1.0)[::, :2]
         T = [trax / image2.pixelSize(), tray / image2.pixelSize()]
-        print("Transformations: ", R, T, sca)
+
         # Update Blobs
         blobs2 = self.__updateBlobs(image2.annotations.seg_blobs, R, T)
         # Min-Max bboxes of blobs
@@ -1550,7 +1680,7 @@ All markers must be valid to proceed.
         # Compute borders
         leftB, topB = abs(int(minX)), abs(int(minY))
         rightB, bottomB = int(maxX - image2W), int(maxY - image2H)
-        print("Borders: ", leftB, rightB, topB, bottomB)
+
         # ================================ Image 2 =============================================
         # Create copy of image 2
         tag2 = "_coreg"
@@ -1630,9 +1760,13 @@ All markers must be valid to proceed.
                 cpy1.addChannel(newFilename, ch.type)
             # Add image
             self.project.addNewImage(cpy1)
+
         # ================================ End =============================================
         QApplication.restoreOverrideCursor()
         # Close widget (?)
+        box = QMessageBox()
+        box.setText("The co-registered image has been added to the project and saved in your folder")
+        box.exec()
         self.close()
 
     def __transformBBox(self, bbox, rot, tra):
@@ -1652,7 +1786,7 @@ All markers must be valid to proceed.
         left = min(pointsX)
         height = max(pointsY) - top
         width = max(pointsX) - left
-        return np.array([top, left, width, height])
+        return np.array([int(top), int(left), int(width)+1, int(height)+1])
 
     def __updateBlobs(self, blobs, rot, tra):
         """
@@ -2189,6 +2323,12 @@ All markers must be valid to proceed.
         # Pass images to viewers
         self.leftPreviewViewer.initializeData(img1, img2, self.sizeL, self.sizeR, q, p)
         self.rightPreviewViewer.initializeData(img1, img2, self.sizeL, self.sizeR, q, p)
+        self.markers_copy = self.markers.copy()
+        self.__fillTable()
+        self.table.itemChanged[QTableWidgetItem].connect(self.updateComputation)
+        self.__updateMeanErrors()
+
+
 
     def __updatePreview(self) -> None:
         """
@@ -2205,17 +2345,82 @@ All markers must be valid to proceed.
         self.rightPreviewViewer.updateRotation(rot)
         self.rightPreviewViewer.updateTranslation(QPointF(trax, tray))
         self.rightPreviewViewer.updateScale(sca)
+
         # Update threshold
         self.rightPreviewViewer.updateThreshold(self.threshold)
+
         # Update alpha value
         self.leftPreviewViewer.updateAlpha(self.alpha / 100.0)
+
+        # update error table
+        if self.error_table_flag is True:
+            # self.__updateErrorTableAfterManualAdjustment()
+            self.__computeErrors()
+            self.__updateErrorTable()
+
+    def __updateErrorTableAfterManualAdjustment(self):
+
+
+        # for (i, marker) in enumerate(self.markers):
+        #     marker.error = None
+        #     self.__clearMarker(i, True)
+        #
+        # # Ensure at least 3 marker are placed
+        # if not self.__hasValidMarkers():
+        #     return
+        #
+
+        R = np.deg2rad(self.R / QtAlignmentToolWidget.ROT_PRECISION)
+        S = self.S / QtAlignmentToolWidget.SCALE_PRECISION
+
+        maxw = max(self.sizeL.x(), self.sizeR.x())
+        maxh = max(self.sizeL.y(), self.sizeR.y())
+
+        tx = self.T[0] / maxw
+        ty = self.T[1] / maxh
+
+        for marker in self.markers:
+
+            qx = float(marker.lViewPos.x())
+            qy = float(marker.lViewPos.y())
+
+            px = float(marker.rViewPos.x())
+            py = float(marker.rViewPos.y())
+
+            px_n = px / maxw
+            py_n = py / maxh
+
+            # apply rotation and translation
+            px_n = (math.cos(R) * px_n - math.sin(R) * py_n) + tx
+            py_n = (math.sin(R) * px_n + math.cos(R) * py_n) + ty
+
+            px = px_n * maxw
+            py = py_n * maxh
+
+            # FIXME: apply scaling
+            # TODO
+
+            marker.errorx = round(qx - px, 2)
+            marker.errory = round(qy - py, 2)
+            marker.error = round(math.sqrt(marker.errorx ** 2 + marker.errory ** 2), 2)
+
+        self.__updateErrorTable()
+
+
 
     def __togglePreviewMode(self, isPreviewMode: bool) -> None:
         """
         Private method to set widget visibility to toggle the Preview Mode on/off.
         :param: isPreviewMode a boolean value to enable / disable the Preview Mode
         """
-        # (Preview-ONLY) widgets
+        # (Preview-ONLY) widget
+        self.meanex.setVisible(isPreviewMode)
+        self.meaney.setVisible(isPreviewMode)
+        self.meanerror.setVisible(isPreviewMode)
+        self.labelmeanx.setVisible(isPreviewMode)
+        self.labelmeany.setVisible(isPreviewMode)
+        self.labelmeanerr.setVisible(isPreviewMode)
+        self.table.setVisible(isPreviewMode)
         self.leftPreviewViewer.setVisible(isPreviewMode)
         self.rightPreviewViewer.setVisible(isPreviewMode)
         self.backToEditButton.setVisible(isPreviewMode)
@@ -2238,8 +2443,8 @@ All markers must be valid to proceed.
         self.rSlider.setVisible(isPreviewMode)
         self.rotateLeftButton.setVisible(isPreviewMode)
         self.rotateRightButton.setVisible(isPreviewMode)
-        self.sSliderLabel.setVisible(isPreviewMode)
-        self.sSlider.setVisible(isPreviewMode)
+        self.sSliderLabel.setVisible(False)
+        self.sSlider.setVisible(False)
         # (NON-Preview-ONLY) widgets
         self.leftImgViewer.setVisible(not isPreviewMode)
         self.rightImgViewer.setVisible(not isPreviewMode)
@@ -2278,6 +2483,145 @@ All markers must be valid to proceed.
         rightPoints = [QPointF(marker.rViewPos.x() / maxw, marker.rViewPos.y() / maxh) for marker in self.markers]
         return leftPoints, rightPoints
 
+
+    @pyqtSlot(QTableWidgetItem)
+    def updateComputation(self, item_changed):
+
+        flag_update_table = True
+
+        num = 0
+        for i in range(0,self.table.rowCount()):
+            item = self.table.item(i,0)
+            if item is not None:
+                if item.checkState() == Qt.Checked:
+                    num= num+1
+            else:
+                flag_update_table = False
+
+        if flag_update_table:
+
+            if num > 3:
+                self.markers = []
+                for i in range(0, self.table.rowCount()):
+                    item = self.table.item(i, 0)
+                    if item.checkState() == Qt.Checked:
+                        self.markers.append(self.markers_copy[i])
+
+                self.__leastSquaresWithSVD()
+
+                # update points
+                (q, p) = self.__normalizedMarkers()
+                self.leftPreviewViewer.points = ([QVector2D(pt) for pt in q.copy()], [QVector2D(pt) for pt in p.copy()])
+                self.leftPreviewViewer.redraw()
+                self.rightPreviewViewer.points = ([QVector2D(pt) for pt in q.copy()], [QVector2D(pt) for pt in p.copy()])
+                self.rightPreviewViewer.redraw()
+
+                # update table
+                self.__computeErrors()
+                self.__updateErrorTable()
+
+            else:
+                box = QMessageBox()
+                box.setText("This marker cannot be enabled, you always need at least four markers")
+                box.exec()
+                item_changed.setCheckState(Qt.Checked)
+
+    def __updateErrorTable(self) -> None:
+
+        for i in range(0, self.table.rowCount()):
+            item = self.table.item(i, 0)
+            if item is None:
+                return
+
+        self.table.blockSignals(True)
+
+        c = 0
+        for i in range(0, self.table.rowCount()):
+            item = self.table.item(i, 0)
+            if item.checkState() == Qt.Checked:
+                self.table.setItem(i, 1, QTableWidgetItem(str(self.markers[c].identifier)))
+                self.table.setItem(i, 2, QTableWidgetItem(str(self.markers[c].errorx)))
+                self.table.setItem(i, 3, QTableWidgetItem(str(self.markers[c].errory)))
+                self.table.setItem(i, 4, QTableWidgetItem(str(self.markers[c].error)))
+                c = c + 1
+            else:
+                self.table.setItem(i, 2, QTableWidgetItem(""))
+                self.table.setItem(i, 3, QTableWidgetItem(""))
+                self.table.setItem(i, 4, QTableWidgetItem(""))
+
+        self.__updateMeanErrors()
+
+        self.error_table_flag = False
+
+        self.table.blockSignals(False)
+
+    def __fillTable(self)-> None:
+
+        #### icon, id, ex, ey, edist ####
+
+        self.table.setFocusPolicy(Qt.NoFocus)
+
+        self.table.setRowCount(len(self.markers_copy))
+        for i in range(0, len(self.markers_copy)):
+
+            chbx= QTableWidgetItem()
+            chbx.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            chbx.setCheckState(Qt.CheckState.Checked)
+
+            self.table.setItem(i, 0, chbx)
+            self.table.setItem(i, 1, QTableWidgetItem(str(self.markers_copy[i].identifier)))
+            self.table.setItem(i, 2, QTableWidgetItem(str(self.markers_copy[i].errorx)))
+            self.table.setItem(i, 3, QTableWidgetItem(str(self.markers_copy[i].errory)))
+            self.table.setItem(i, 4, QTableWidgetItem(str(self.markers_copy[i].error)))
+
+    def __updateMeanErrors(self):
+
+        sumex=0.0
+        sumey=0.0
+        sumerr=0.0
+
+        for i in range(0,len(self.markers)):
+            sumex = sumex + abs(self.markers[i].errorx)
+            sumey = sumey + abs(self.markers[i].errory)
+            sumerr = sumerr + self.markers[i].error
+
+        meanerrorx= round((sumex/ len(self.markers)),1)
+        meanerrory = round(sumey/len(self.markers),1)
+        meanerror = round(sumerr / len(self.markers), 1)
+        self.meanex.setText(("{:.3f}".format(meanerrorx)))
+        self.meaney.setText(("{:.3f}".format(meanerrory)))
+        self.meanerror.setText(("{:.3f}".format(meanerror)))
+
+    def __computeErrors(self):
+
+        # FIXME: scale is not considered
+
+        # NOTE: self.R is an angle (in degree) and not a rotation matrix
+        angle = np.deg2rad(self.R / QtAlignmentToolWidget.ROT_PRECISION)
+        S = self.S / QtAlignmentToolWidget.SCALE_PRECISION
+
+        maxw = max(self.sizeL.x(), self.sizeR.x())
+        maxh = max(self.sizeL.y(), self.sizeR.y())
+        T = [self.T[0] / maxw, self.T[1] / maxh]
+
+        (q, p) = self.__normalizedMarkers()
+
+        Rmat = np.matrix([[math.cos(-angle), math.sin(-angle)],
+                          [-math.sin(-angle), math.cos(-angle)]])
+
+        sol = [(Rmat @ [pi.x(), pi.y()] + T) for pi in p]
+        sol = [QPointF(s[0, 0], s[0, 1]) for s in sol]
+
+        # Compute errors
+        err = [[a.x() - b.x(), a.y() - b.y()] for (a, b) in zip(sol, q)]
+        err = [(x * maxw, y * maxh) for (x, y) in err]
+        disterr = [math.sqrt(x ** 2 + y ** 2) for (x, y) in err]
+        for (i, (e, marker)) in enumerate(zip(disterr, self.markers)):
+            marker.errorx = round(err[i][0], 1)
+            marker.errory = round(err[i][1], 1)
+            marker.error = round(e, 1)
+
+
     def __leastSquaresWithSVD(self) -> None:
         """
         Private method to compute the Least-Squares Rigid Motion using SVD.
@@ -2300,9 +2644,6 @@ All markers must be valid to proceed.
         # Ensure at least 3 marker are placed
         if not self.__hasValidMarkers():
             return
-
-        # TIMING
-        # timeStart = time.perf_counter()
 
         # ==================================================================================
         # [0] Retrieve vars
@@ -2397,17 +2738,15 @@ All markers must be valid to proceed.
         sol = [(R @ [pi.x(), pi.y()] + T) for pi in p]
         sol = [QPointF(s[0, 0], s[0, 1]) for s in sol]
 
-        # TIMING
-        # timeEnd = time.perf_counter()
-        # print("SVD time:", (timeEnd - timeStart) * 1000, "ms with", len(p), "markers.")
-
         # Compute errors
         err = [[a.x() - b.x(), a.y() - b.y()] for (a, b) in zip(sol, q)]
         maxw = max(self.sizeL.x(), self.sizeR.x())
         maxh = max(self.sizeL.y(), self.sizeR.y())
         err = [(x * maxw, y * maxh) for (x, y) in err]
-        err = [math.sqrt(x ** 2 + y ** 2) for (x, y) in err]
-        for (i, (e, marker)) in enumerate(zip(err, self.markers)):
+        disterr = [math.sqrt(x ** 2 + y ** 2) for (x, y) in err]
+        for (i, (e, marker)) in enumerate(zip(disterr, self.markers)):
+            marker.errorx = round(err[i][0], 2)
+            marker.errory = round(err[i][1], 2)
             marker.error = round(e, 2)
 
         # Results
@@ -2425,12 +2764,20 @@ All markers must be valid to proceed.
         self.svdRes[2] = self.S
 
         # Update UI
+        self.sSlider.blockSignals(True)
         self.xSlider.setValue(self.T[0])
         self.ySlider.setValue(self.T[1])
         self.rSlider.setValue(self.R)
-        self.sSlider.blockSignals(True)
         self.sSlider.setMinimum(round(self.S * (1.0 - QtAlignmentToolWidget.SCALE_RANGE)))
         self.sSlider.setMaximum(round(self.S * (1.0 + QtAlignmentToolWidget.SCALE_RANGE)))
-        self.sSlider.blockSignals(False)
         self.sSlider.setValue(self.S)
         self.sSlider.setEnabled(self.canScale)
+        self.scaleIncButton.setEnabled(self.canScale)
+        self.scaleDecButton.setEnabled(self.canScale)
+        self.sSlider.blockSignals(False)
+
+        # check if __computeErrors is ok
+        #self.__computeErrors()
+        #for i, marker in enumerate(self.markers):
+        #    print("X difference:", marker.errorx - round(err[i][0], 2))
+        #    print("Y difference:", marker.errory - round(err[i][1], 2))
